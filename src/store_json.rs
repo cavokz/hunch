@@ -47,17 +47,17 @@ impl JsonFileStore {
         Ok(lock_file)
     }
 
-    pub(crate) fn read_journal(&self, path: &Path) -> Result<JournalFile, StoreError> {
+    pub(crate) fn read_journal(&self, path: &Path, name: &str) -> Result<JournalFile, StoreError> {
         let data = fs::read_to_string(path)?;
         let raw: serde_json::Value = serde_json::from_str(&data)?;
-        self.parse_journal(raw)
+        self.parse_journal(raw, name)
     }
 
     /// Parse a raw JSON [`Value`] into a [`JournalFile`], running migration and validation.
     ///
     /// Extracted from [`Self::read_journal`] so that [`list_dir`] can reuse the already-parsed
     /// raw value without re-reading the file.
-    fn parse_journal(&self, raw: serde_json::Value) -> Result<JournalFile, StoreError> {
+    fn parse_journal(&self, raw: serde_json::Value, name: &str) -> Result<JournalFile, StoreError> {
         let value = match migrate::migrate(raw) {
             MigrateResult::Current(v) | MigrateResult::Migrated(v) => v,
             MigrateResult::TooNew { found, max } => {
@@ -65,6 +65,7 @@ impl JsonFileStore {
                     found,
                     max,
                     origin: crate::store::SchemaOrigin::Storage,
+                    name: name.to_string(),
                 });
             }
             MigrateResult::Invalid => {
@@ -151,7 +152,7 @@ impl JsonFileStore {
                                 .map(|n| u32::try_from(n).unwrap_or(u32::MAX))
                                 .unwrap_or(0)
                         });
-                        let result = self.parse_journal(raw);
+                        let result = self.parse_journal(raw, &name);
                         (raw_schema, result)
                     }
                 };
@@ -203,7 +204,7 @@ impl Store for JsonFileStore {
         if !path.exists() {
             return Err(StoreError::NotFound(name.into()));
         }
-        let mut journal = self.read_journal(&path)?;
+        let mut journal = self.read_journal(&path, name)?;
         // The file stem is the authoritative name; override whatever the JSON says.
         journal.name = name.to_string();
         let total = journal.items.len();
@@ -241,10 +242,16 @@ impl Store for JsonFileStore {
         }
         let path = self.journal_path(name);
         if !path.exists() {
-            return Err(StoreError::NotFound(name.into()));
+            // If the journal is in the archive, return ReadOnly rather than NotFound
+            // so callers know to call unarchive_journal first.
+            return Err(if self.archive_path(name).exists() {
+                StoreError::ReadOnly(name.into())
+            } else {
+                StoreError::NotFound(name.into())
+            });
         }
         let _lock = self.with_lock(name)?;
-        let mut journal = self.read_journal(&path)?;
+        let mut journal = self.read_journal(&path, name)?;
         // The file stem is the authoritative name; keep it consistent on write-back.
         journal.name = name.to_string();
         journal.items.extend(items);
@@ -266,7 +273,7 @@ impl Store for JsonFileStore {
                 return Err(StoreError::NotFound(name.into()));
             }
             let _lock = self.with_lock(name)?;
-            let mut dest = self.read_journal(&path)?;
+            let mut dest = self.read_journal(&path, name)?;
             dest.name = name.to_string();
             let existing_ids: std::collections::HashSet<&str> =
                 dest.items.iter().map(|i| i.id.as_str()).collect();
@@ -569,7 +576,7 @@ mod tests {
         });
         std::fs::write(&path, serde_json::to_string_pretty(&raw).unwrap()).unwrap();
 
-        let err = store.read_journal(&path).unwrap_err();
+        let err = store.read_journal(&path, "test-journal").unwrap_err();
         assert!(
             matches!(err, StoreError::Io(ref e) if e.kind() == std::io::ErrorKind::InvalidData),
             "expected InvalidData, got {err:?}"
@@ -592,7 +599,7 @@ mod tests {
         });
         std::fs::write(&path, serde_json::to_string_pretty(&raw).unwrap()).unwrap();
 
-        let err = store.read_journal(&path).unwrap_err();
+        let err = store.read_journal(&path, "test-journal").unwrap_err();
         assert!(
             matches!(err, StoreError::Io(ref e) if e.kind() == std::io::ErrorKind::InvalidData),
             "expected InvalidData, got {err:?}"
@@ -615,7 +622,7 @@ mod tests {
         });
         std::fs::write(&path, serde_json::to_string_pretty(&raw).unwrap()).unwrap();
 
-        let err = store.read_journal(&path).unwrap_err();
+        let err = store.read_journal(&path, "test-journal").unwrap_err();
         assert!(
             matches!(err, StoreError::Io(ref e) if e.kind() == std::io::ErrorKind::InvalidData),
             "expected InvalidData, got {err:?}"
@@ -638,7 +645,7 @@ mod tests {
         });
         std::fs::write(&path, serde_json::to_string_pretty(&raw).unwrap()).unwrap();
 
-        let err = store.read_journal(&path).unwrap_err();
+        let err = store.read_journal(&path, "test-journal").unwrap_err();
         assert!(
             matches!(err, StoreError::Io(ref e) if e.kind() == std::io::ErrorKind::InvalidData),
             "expected InvalidData, got {err:?}"
@@ -728,7 +735,7 @@ mod tests {
         });
         std::fs::write(&path, serde_json::to_string_pretty(&raw).unwrap()).unwrap();
 
-        let journal = store.read_journal(&path).unwrap();
+        let journal = store.read_journal(&path, "test-journal").unwrap();
 
         // Migration should produce a journal at the current schema version.
         assert_eq!(journal.schema, migrate::CURRENT_SCHEMA);
@@ -796,7 +803,7 @@ mod tests {
         });
         std::fs::write(&path, serde_json::to_string_pretty(&raw).unwrap()).unwrap();
 
-        let err = store.read_journal(&path).unwrap_err();
+        let err = store.read_journal(&path, "test-journal").unwrap_err();
         assert!(
             matches!(
                 err,
@@ -804,6 +811,7 @@ mod tests {
                     found: 9999,
                     max: migrate::CURRENT_SCHEMA,
                     origin: crate::store::SchemaOrigin::Storage,
+                    ..
                 }
             ),
             "expected SchemaTooNew, got {err:?}"

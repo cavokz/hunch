@@ -207,18 +207,19 @@ struct SummarizeParams {
 
 // ── Server ──────────────────────────────────────────────────────────
 
-const MAX_CONTENT: usize = 64 * 1024;
-const MAX_TAGS: usize = 20;
-const MAX_TAG_LEN: usize = 64;
-const MAX_META: usize = 8 * 1024;
+pub(crate) const MAX_CONTENT: usize = 64 * 1024;
+pub(crate) const MAX_TAGS: usize = 20;
+pub(crate) const MAX_TAG_LEN: usize = 64;
+pub(crate) const MAX_META: usize = 8 * 1024;
 
 fn validate_meta(meta: &Option<HashMap<String, serde_json::Value>>) -> Result<(), ErrorData> {
     if let Some(m) = meta {
         let size = serde_json::to_string(m).unwrap_or_default().len();
         if size > MAX_META {
+            let msg = format!("meta exceeds {MAX_META} byte limit ({size} bytes)");
             return Err(ErrorData::invalid_params(
-                format!("meta exceeds {MAX_META} byte limit ({size} bytes)"),
-                None,
+                msg.clone(),
+                Some(serde_json::json!({ "type": "invalid_input", "hint": msg })),
             ));
         }
     }
@@ -228,16 +229,18 @@ fn validate_meta(meta: &Option<HashMap<String, serde_json::Value>>) -> Result<()
 fn validate_tags(tags: &Option<Vec<String>>) -> Result<(), ErrorData> {
     if let Some(t) = tags {
         if t.len() > MAX_TAGS {
+            let msg = format!("too many tags ({}, max {MAX_TAGS})", t.len());
             return Err(ErrorData::invalid_params(
-                format!("too many tags ({}, max {MAX_TAGS})", t.len()),
-                None,
+                msg.clone(),
+                Some(serde_json::json!({ "type": "invalid_input", "hint": msg })),
             ));
         }
         for tag in t {
             if tag.len() > MAX_TAG_LEN {
+                let msg = format!("tag exceeds {MAX_TAG_LEN} byte limit ({} bytes)", tag.len());
                 return Err(ErrorData::invalid_params(
-                    format!("tag exceeds {MAX_TAG_LEN} char limit ({} chars)", tag.len()),
-                    None,
+                    msg.clone(),
+                    Some(serde_json::json!({ "type": "invalid_input", "hint": msg })),
                 ));
             }
         }
@@ -314,7 +317,16 @@ impl ForayServer {
                     "hint": "Journal is archived. Call 'unarchive_journal' to make it writable again.",
                 })),
             ),
-            StoreError::SchemaTooNew { found, max, origin } => {
+            StoreError::InvalidInput(msg) => ErrorData::invalid_params(
+                msg.clone(),
+                Some(serde_json::json!({ "type": "invalid_input", "hint": msg })),
+            ),
+            StoreError::SchemaTooNew {
+                found,
+                max,
+                origin,
+                name,
+            } => {
                 let hint = match origin {
                     SchemaOrigin::Storage => format!(
                         "A journal file uses schema {found} but the connected foray only supports \
@@ -331,6 +343,7 @@ impl ForayServer {
                     format!("journal schema {found} is too new (max supported: {max})"),
                     Some(serde_json::json!({
                         "type": "schema_too_new",
+                        "name": name,
                         "found": found,
                         "max": max,
                         "remedy": "upgrade_foray",
@@ -409,7 +422,10 @@ impl ForayServer {
                 format!(
                     "unknown item type: {other}. Valid types: finding, decision, snippet, note"
                 ),
-                None,
+                Some(serde_json::json!({
+                    "type": "invalid_input",
+                    "hint": format!("unknown item type: {other}. Valid types: finding, decision, snippet, note"),
+                })),
             )),
         }
     }
@@ -442,10 +458,20 @@ impl ForayServer {
     ) -> Result<CallToolResult, ErrorData> {
         self.preflight(args.nuance.as_deref())?;
 
-        validate_name(&args.name).map_err(|e| ErrorData::invalid_params(e, None))?;
+        validate_name(&args.name).map_err(|e| {
+            ErrorData::invalid_params(
+                e.clone(),
+                Some(serde_json::json!({ "type": "invalid_input", "hint": e })),
+            )
+        })?;
         let store = self.resolve_store(args.store.as_deref())?;
 
-        let title = validate_title(&args.title).map_err(|e| ErrorData::invalid_params(e, None))?;
+        let title = validate_title(&args.title).map_err(|e| {
+            ErrorData::invalid_params(
+                e.clone(),
+                Some(serde_json::json!({ "type": "invalid_input", "hint": e })),
+            )
+        })?;
         validate_meta(&args.meta)?;
         store
             .create(&args.name, title.clone(), args.meta)
@@ -462,7 +488,12 @@ impl ForayServer {
 
     async fn do_sync_journal(&self, args: SyncJournalParams) -> Result<CallToolResult, ErrorData> {
         self.preflight(args.nuance.as_deref())?;
-        validate_name(&args.name).map_err(|e| ErrorData::invalid_params(e, None))?;
+        validate_name(&args.name).map_err(|e| {
+            ErrorData::invalid_params(
+                e.clone(),
+                Some(serde_json::json!({ "type": "invalid_input", "hint": e })),
+            )
+        })?;
         let store = self.resolve_store(args.store.as_deref())?;
 
         // Add items if provided
@@ -471,13 +502,14 @@ impl ForayServer {
             let mut items_to_add = Vec::new();
             for input in inputs {
                 if input.content.len() > MAX_CONTENT {
+                    let msg = format!(
+                        "content exceeds {} byte limit ({} bytes)",
+                        MAX_CONTENT,
+                        input.content.len()
+                    );
                     return Err(ErrorData::invalid_params(
-                        format!(
-                            "content exceeds {} byte limit ({} bytes)",
-                            MAX_CONTENT,
-                            input.content.len()
-                        ),
-                        None,
+                        msg.clone(),
+                        Some(serde_json::json!({ "type": "invalid_input", "hint": msg })),
                     ));
                 }
                 validate_tags(&input.tags)?;
@@ -560,7 +592,12 @@ impl ForayServer {
         args: ArchiveJournalParams,
     ) -> Result<CallToolResult, ErrorData> {
         self.preflight(args.nuance.as_deref())?;
-        validate_name(&args.name).map_err(|e| ErrorData::invalid_params(e, None))?;
+        validate_name(&args.name).map_err(|e| {
+            ErrorData::invalid_params(
+                e.clone(),
+                Some(serde_json::json!({ "type": "invalid_input", "hint": e })),
+            )
+        })?;
         let store = self.resolve_store(args.store.as_deref())?;
         store.archive(&args.name).await.map_err(Self::store_err)?;
         Ok(CallToolResult::success(vec![Content::text(
@@ -573,7 +610,12 @@ impl ForayServer {
         args: UnarchiveJournalParams,
     ) -> Result<CallToolResult, ErrorData> {
         self.preflight(args.nuance.as_deref())?;
-        validate_name(&args.name).map_err(|e| ErrorData::invalid_params(e, None))?;
+        validate_name(&args.name).map_err(|e| {
+            ErrorData::invalid_params(
+                e.clone(),
+                Some(serde_json::json!({ "type": "invalid_input", "hint": e })),
+            )
+        })?;
         let store = self.resolve_store(args.store.as_deref())?;
         store.unarchive(&args.name).await.map_err(Self::store_err)?;
         Ok(CallToolResult::success(vec![Content::text(

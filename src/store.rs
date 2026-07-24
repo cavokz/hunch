@@ -11,11 +11,14 @@ pub(crate) enum StoreError {
     AlreadyExists(String),
     #[error("journal is read-only: {0}")]
     ReadOnly(String),
+    #[error("invalid input: {0}")]
+    InvalidInput(String),
     #[error("journal schema {found} is too new (max supported: {max})")]
     SchemaTooNew {
         found: u32,
         max: u32,
         origin: SchemaOrigin,
+        name: String,
     },
     #[error("wire protocol {found} is too new (max supported: {max})")]
     ProtocolTooNew { found: u32, max: u32 },

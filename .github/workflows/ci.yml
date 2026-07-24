@@ -24,6 +24,16 @@ jobs:
       - run: cargo test
       - run: cargo build --release
 
+  specs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install -g @fission-ai/openspec
+      - run: openspec validate --specs --strict --no-interactive
+
   cross-check:
     strategy:
       matrix:

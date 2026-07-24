@@ -1,0 +1,20 @@
+schema: spec-driven
+
+context: |
+  Project: foray — a Rust MCP server + CLI for persistent AI agent journals.
+  Tagline: "Start with a foray. Keep the trail."
+
+  Tech stack: Rust, rmcp (MCP SDK v1.4.0), tokio (async, current_thread), clap (CLI derive),
+  serde/serde_json, fs2 (file locking), home, anyhow, thiserror, chrono, rand.
+
+  Architecture:
+  - Single binary: `foray serve` starts the MCP server; all other subcommands are direct store access.
+  - Pluggable journal store (trait Store). Ships with a local JSON-file store and a
+    stdio-subprocess remote store that tunnels over a child process to a remote foray instance.
+  - The MCP server is fully stateless — no session state between calls.
+
+  Spec conventions:
+  - Specs describe behavior and contracts, not implementation.
+  - No Rust type names, crate names, or struct field names in specs.
+  - Decisions are expressed as normative SHALL/MUST requirements with their implications stated.
+  - Each scenario is a potential test case: concrete, observable, verifiable.
