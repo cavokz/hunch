@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -115,23 +117,29 @@ def main() -> int:
         }
     )
 
+    tmp_data_dir = tempfile.mkdtemp(prefix="opencode-eval-")
+    env["XDG_DATA_HOME"] = tmp_data_dir
+
     all_results: list[tuple[str, list[tuple[str, bool]]]] = []
 
-    with ThreadPoolExecutor(max_workers=len(models)) as pool:
-        futures = {pool.submit(run_model, m, timestamp, env): m for m in models}
-        for future in as_completed(futures):
-            model, results = future.result()
-            all_results.append((model, results))
+    try:
+        with ThreadPoolExecutor(max_workers=len(models)) as pool:
+            futures = {pool.submit(run_model, m, timestamp, env): m for m in models}
+            for future in as_completed(futures):
+                model, results = future.result()
+                all_results.append((model, results))
 
-    if len(models) > 1:
-        _print("\n=== SUMMARY ===", flush=True)
-        for model, results in all_results:
-            passed_count = sum(1 for _, p in results if p)
-            total = len(results)
-            _print(f"  {model}: {passed_count}/{total}", flush=True)
+        if len(models) > 1:
+            _print("\n=== SUMMARY ===", flush=True)
+            for model, results in all_results:
+                passed_count = sum(1 for _, p in results if p)
+                total = len(results)
+                _print(f"  {model}: {passed_count}/{total}", flush=True)
 
-    any_fail = any(not p for _, results in all_results for _, p in results)
-    return 1 if any_fail else 0
+        any_fail = any(not p for _, results in all_results for _, p in results)
+        return 1 if any_fail else 0
+    finally:
+        shutil.rmtree(tmp_data_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

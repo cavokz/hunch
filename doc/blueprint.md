@@ -534,7 +534,7 @@ tests/eval/
     single-item.toml
 ```
 
-**Isolation**: the runner sets `OPENCODE_CONFIG_CONTENT` to activate only the `foray-eval` MCP server (which points at `tests/fixtures`) and disable all other foray servers, preventing tool-name collisions.
+**Isolation**: the runner sets `OPENCODE_CONFIG_CONTENT` to activate only the `foray-eval` MCP server (which points at `tests/fixtures`) and disable all other foray servers, preventing tool-name collisions. It also sets `XDG_DATA_HOME` to a fresh temporary directory so each eval run gets a clean opencode session DB; the directory is removed in a `finally` block after the run completes.
 
 **Scenario format** (TOML):
 - `journal` — fixture journal name (must exist under `tests/fixtures/journals/`)
