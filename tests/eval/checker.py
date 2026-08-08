@@ -93,15 +93,22 @@ def check_tool_errors(calls: list[dict]) -> list[str]:
     ]
 
 
-def check_default(calls: list[dict]) -> list[str]:
-    """Check that list_journals is called before the first sync_journal."""
+def check_protocol_order(calls: list[dict]) -> list[str]:
+    """Protocol checks: hello before list_journals, list_journals before sync_journal."""
     fails = []
-    sync_indices = [i for i, c in enumerate(calls) if _tool_name(c["tool"]) == "sync_journal"]
+    hello_indices = [i for i, c in enumerate(calls) if _tool_name(c["tool"]) == "hello"]
     list_indices = [i for i, c in enumerate(calls) if _tool_name(c["tool"]) == "list_journals"]
+    sync_indices = [i for i, c in enumerate(calls) if _tool_name(c["tool"]) == "sync_journal"]
+
+    if list_indices:
+        if not hello_indices:
+            fails.append("hello never called before list_journals")
+        elif list_indices[0] < hello_indices[0]:
+            fails.append("list_journals called before hello")
 
     if sync_indices:
         if not list_indices:
-            fails.append("list_journals never called")
+            fails.append("list_journals never called before sync_journal")
         elif sync_indices[0] < list_indices[0]:
             fails.append("sync_journal called before list_journals")
 
@@ -285,8 +292,8 @@ def run_checks(
 ) -> tuple[bool, list[str], list[dict], list[str]]:
     """Run all checks for a scenario.
 
-    Checks are declared in scenario["checks"]. Universal checks
-    (tool_errors, default, archived flag) always run.
+    Checks are declared in scenario["checks"]. Protocol checks
+    (tool_errors, call ordering, archived flag) always run.
 
     Returns (passed, failures, tool_calls, texts).
     """
@@ -296,9 +303,9 @@ def run_checks(
     if bad_lines:
         failures.append(f"{len(bad_lines)} non-JSON line(s) in event stream")
 
-    # Universal checks — always run
+    # Protocol checks — always run
     failures.extend(check_tool_errors(tool_calls))
-    failures.extend(check_default(tool_calls))
+    failures.extend(check_protocol_order(tool_calls))
     failures.extend(check_archived_flag(tool_calls, scenario.get("archived", False)))
 
     if returncode != 0:

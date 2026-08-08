@@ -508,6 +508,9 @@ fn classify_mcp_error(e: &ErrorData) -> StoreError {
     // Structured path: check data["type"] first.
     if let Some(t) = e.data.as_ref().and_then(|d| d["type"].as_str()) {
         match t {
+            "invalid_input" => {
+                return StoreError::InvalidInput(e.message.to_string());
+            }
             "journal_not_found" => {
                 let name = e
                     .data
@@ -552,6 +555,12 @@ fn classify_mcp_error(e: &ErrorData) -> StoreError {
                     found,
                     max,
                     origin: SchemaOrigin::Storage,
+                    name: e
+                        .data
+                        .as_ref()
+                        .and_then(|d| d["name"].as_str())
+                        .unwrap_or("")
+                        .to_string(),
                 };
             }
             "protocol_too_new" => {
@@ -659,6 +668,7 @@ impl Store for StdioStore {
                     found,
                     max,
                     origin: crate::store::SchemaOrigin::Wire,
+                    name: wire.name.clone(),
                 });
             }
             // migrate_input is always a Value::Object constructed above.
@@ -732,9 +742,10 @@ impl Store for StdioStore {
         _merge: bool,
         _archived: bool,
     ) -> Result<(usize, usize), StoreError> {
-        Err(io_err(
+        Err(StoreError::Unsupported(
             "import is not supported by remote stores; use pipes instead: \
-             foray export <name> | ssh host foray import <name>",
+             foray export <name> | ssh host foray import <name>"
+                .into(),
         ))
     }
 

@@ -1,3 +1,3 @@
 # Copilot Instructions
 
-After any code change, review `doc/blueprint.md` and update it to reflect the current state. The blueprint is the living spec — code and doc must stay in sync. Covers: tool signatures, response formats, CLI flags, type definitions, storage layout, behavioral rules.
+After any code change, review the relevant spec(s) under `openspec/specs/` and update them to reflect the current state. The specs are the living documentation — code and specs must stay in sync. Each spec covers a distinct capability: `data-model`, `storage`, `mcp-server`, `cli`, `stdio-store`, `testing`.

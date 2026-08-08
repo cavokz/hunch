@@ -18,11 +18,6 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[command(name = "foray", version, about = "Persistent investigation journals")]
 pub(crate) struct Cli {
-    /// Override journal name (skips env + .forayrc resolution)
-    #[arg(long, global = true)]
-    #[cfg_attr(feature = "dynamic-completion", arg(add = ArgValueCompleter::new(complete_journal_names)))]
-    pub(crate) journal: Option<String>,
-
     /// Override store name (skips env + .forayrc resolution)
     #[arg(long, global = true)]
     #[cfg_attr(feature = "dynamic-completion", arg(add = ArgValueCompleter::new(complete_store_names)))]
@@ -56,6 +51,10 @@ pub(crate) enum Commands {
     Add {
         /// Item content
         content: String,
+        /// Journal name (overrides env + .forayrc)
+        #[arg(short = 'j', long = "journal")]
+        #[cfg_attr(feature = "dynamic-completion", arg(add = ArgValueCompleter::new(complete_journal_names)))]
+        journal: Option<String>,
         /// Item type: finding, decision, snippet, note
         #[arg(long, name = "type", default_value = "note")]
         item_type: String,
@@ -476,7 +475,7 @@ pub(crate) async fn run(cli: &Cli, store: &dyn Store) -> anyhow::Result<()> {
             follow,
             archived,
         } => {
-            let journal_name = resolve_journal(cli.journal.as_deref(), name.as_deref())?;
+            let journal_name = resolve_journal(None, name.as_deref())?;
             let (journal, total) = store
                 .load(&journal_name, &Pagination::all(), *archived)
                 .await?;
@@ -517,24 +516,61 @@ pub(crate) async fn run(cli: &Cli, store: &dyn Store) -> anyhow::Result<()> {
         }
         Commands::Add {
             content,
+            journal,
             item_type,
             item_ref,
             tags,
             meta,
         } => {
-            let journal_name = resolve_journal(cli.journal.as_deref(), None)?;
+            let journal_name = resolve_journal(journal.as_deref(), None)?;
             let it = parse_item_type(item_type)?;
             let parsed_tags = tags.as_ref().map(|t| {
                 t.split(',')
                     .map(|s| s.trim().to_string())
                     .collect::<Vec<_>>()
             });
+            // Validate limits (same rules as MCP server)
+            if content.len() > crate::server::MAX_CONTENT {
+                anyhow::bail!(
+                    "content exceeds {} byte limit ({} bytes)",
+                    crate::server::MAX_CONTENT,
+                    content.len()
+                );
+            }
+            if let Some(ref t) = parsed_tags {
+                if t.len() > crate::server::MAX_TAGS {
+                    anyhow::bail!(
+                        "too many tags ({}, max {})",
+                        t.len(),
+                        crate::server::MAX_TAGS
+                    );
+                }
+                for tag in t {
+                    if tag.len() > crate::server::MAX_TAG_LEN {
+                        anyhow::bail!(
+                            "tag exceeds {} byte limit ({} bytes)",
+                            crate::server::MAX_TAG_LEN,
+                            tag.len()
+                        );
+                    }
+                }
+            }
             let mut parsed_meta = parse_meta(meta);
             if let Some(r) = item_ref {
                 parsed_meta
                     .get_or_insert_with(HashMap::new)
                     .entry("ref".to_string())
                     .or_insert_with(|| serde_json::Value::String(r.clone()));
+            }
+            if let Some(ref m) = parsed_meta {
+                let meta_size = serde_json::to_string(m).unwrap_or_default().len();
+                if meta_size > crate::server::MAX_META {
+                    anyhow::bail!(
+                        "meta exceeds {} byte limit ({} bytes)",
+                        crate::server::MAX_META,
+                        meta_size
+                    );
+                }
             }
             let item = JournalItem {
                 id: item_id(),
@@ -919,7 +955,6 @@ mod tests {
 
     fn make_cli(command: Commands) -> Cli {
         Cli {
-            journal: None,
             store: None,
             command,
         }
