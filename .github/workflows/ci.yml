@@ -24,6 +24,30 @@ jobs:
       - run: cargo test
       - run: cargo build --release
 
+  online-tests:
+    runs-on: ubuntu-latest
+    env:
+      ES_TEST_URL: http://localhost:9292
+      ES_TEST_USER: elastic
+      ES_TEST_PASSWORD: changeme
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Start Elasticsearch
+        run: make es-up
+      - name: Initialize Elasticsearch
+        run: |
+          if ! make es-init ES_URL=$ES_TEST_URL ES_USER=$ES_TEST_USER ES_PASSWORD=$ES_TEST_PASSWORD; then
+            make es-logs
+            exit 1
+          fi
+      - name: Run online tests
+        run: cargo test --test elasticsearch_store_test -- --include-ignored
+      - name: Stop Elasticsearch
+        if: always()
+        run: make es-down
+
   cross-check:
     strategy:
       matrix:

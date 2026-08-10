@@ -231,7 +231,7 @@ impl Store for JsonFileStore {
         name: &str,
         items: Vec<JournalItem>,
         archived: bool,
-    ) -> Result<usize, StoreError> {
+    ) -> Result<Vec<String>, StoreError> {
         if archived {
             return Err(if self.archive_path(name).exists() {
                 StoreError::ReadOnly(name.into())
@@ -248,9 +248,8 @@ impl Store for JsonFileStore {
         // The file stem is the authoritative name; keep it consistent on write-back.
         journal.name = name.to_string();
         journal.items.extend(items);
-        let count = journal.items.len();
         self.write_journal(&path, &journal)?;
-        Ok(count)
+        Ok(vec![])
     }
 
     async fn import(
@@ -506,6 +505,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(loaded.name, "arch-test");
+        // &[...] temporary lives to end-of-statement, safely covering .await.
         assert!(matches!(
             store
                 .add_items("arch-test", vec![make_item("x")], true)
@@ -762,6 +762,7 @@ mod tests {
         std::fs::write(&path, serde_json::to_string_pretty(&raw).unwrap()).unwrap();
 
         // add_items holds the lock and rewrites the file — this is the heal path.
+        // &[...] temporary lives to end-of-statement, safely covering .await.
         store
             .add_items("legacy", vec![make_item("new item")], false)
             .await
@@ -887,6 +888,7 @@ mod tests {
         let (store, _dir) = make_store();
         store.create("pag", "P".into(), None).await.unwrap();
         for i in 0..5 {
+            // &[...] temporary lives to end-of-statement, safely covering .await.
             store
                 .add_items("pag", vec![make_item(&format!("item-{i}"))], false)
                 .await

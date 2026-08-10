@@ -139,3 +139,117 @@ Install `SKILL.md` in both locations if you use Claude Code alongside other tool
 If you changed the MCP config in Step 2, make sure the application has been restarted or a new chat session has been started before continuing.
 
 Invoke the `list_journals` MCP tool now. If the server is running correctly, it will respond (the list may be empty — that is fine).
+
+---
+
+## Optional: Configure Stores
+
+By default foray uses a local JSON file store at `~/.foray/journals/`. To add additional stores — including remote or shared ones — create `~/.foray/config.toml`:
+
+```toml
+# SSH remote: journals stored on a server running foray
+[stores.remote]
+description = "My remote server"
+type = "foray_stdio"
+command = "ssh"
+args = ["user@myserver", "--", "foray"]
+
+# Elasticsearch: journals stored in an ES index
+[stores.team]
+description = "Team shared journals"
+type = "elasticsearch"
+url = "https://your-es-host/foray-team"   # index is the last path segment
+api_key = "..."        # recommended: base64(id:api_key) from ES API key creation
+# username = "elastic" # alternative to api_key
+# password = "changeme"
+```
+
+Use a named store with the `--store` flag or by setting `current-store` in `.forayrc`:
+
+```sh
+foray list --store team
+foray open my-journal --store team   # also sets current-store in .forayrc
+```
+
+### Elasticsearch: Cluster Setup (admin, once per cluster/team)
+
+These steps require admin credentials and are done once per cluster (index template) or once per team (role). They prepare ES to host foray indices safely.
+
+**1 — Provision the index template:**
+
+Download [`doc/es-index-template.json`](https://raw.githubusercontent.com/cavokz/foray/main/doc/es-index-template.json) from the repository, then:
+
+```sh
+curl -u elastic:ADMIN_PASSWORD \
+  -X PUT https://your-es-host/_index_template/foray \
+  -H 'Content-Type: application/json' \
+  -d @es-index-template.json
+```
+
+The template applies to any index matching `foray-*` and enforces strict field mappings. It must exist before foray creates its first index.
+
+**2 — Create a dedicated role (once per team):**
+
+Foray needs these index-level privileges on its indices:
+
+| Privilege | Used for |
+|-----------|----------|
+| `create_index` | Auto-creating the index on first write |
+| `index` | Indexing journal and item documents (`_bulk`, `_update`) |
+| `read` | Searching journals and items (`_search`, `_doc`) |
+
+Create one role per team, scoped to that team's indices only (e.g. `foray-team-a-*` for team A). Run in [Kibana Dev Tools](https://www.elastic.co/guide/en/kibana/current/console-kibana.html). If you prefer `curl`, ask an AI assistant to translate.
+
+```
+PUT /_security/role/foray-team-a
+{
+  "indices": [{
+    "names": ["foray-team-a-*"],
+    "privileges": ["create_index", "index", "read"]
+  }]
+}
+```
+
+### Elasticsearch: User Setup (per user)
+
+These steps are performed by each user to obtain credentials scoped to foray indices only.
+
+**1 — Create a scoped API key:**
+
+Open [Kibana Dev Tools](https://www.elastic.co/guide/en/kibana/current/console-kibana.html) and run. If you prefer `curl`, ask an AI assistant to translate.
+
+```
+POST /_security/api_key
+{
+  "name": "foray-team-a",
+  "role_descriptors": {
+    "foray-team-a": {
+      "indices": [{
+        "names": ["foray-team-a-*"],
+        "privileges": ["create_index", "index", "read"]
+      }]
+    }
+  }
+}
+```
+
+Use the `encoded` field from the response as the `api_key` value in config. The `role_descriptors` cap the key's access to `foray-team-a-*` indices only, regardless of the creating user's broader permissions.
+
+**2 — Add the store to `~/.foray/config.toml`:**
+
+```toml
+[stores.team-a]
+description = "Team A shared journals"
+type = "elasticsearch"
+url = "https://your-es-host/foray-team-a"
+api_key = "<encoded value from step 1>"
+```
+
+**3 — Verify:**
+
+```sh
+foray list --store team-a
+```
+
+An empty list (no error) confirms the store is reachable and correctly configured.
+

@@ -16,8 +16,7 @@
 
 use serde_json::{Map, Value};
 
-/// The schema version produced by this build.
-pub(crate) const CURRENT_SCHEMA: u32 = 1;
+pub(crate) use crate::types::CURRENT_SCHEMA;
 
 /// The wire protocol version produced by this build.
 ///

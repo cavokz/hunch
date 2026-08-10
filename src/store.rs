@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub(crate) enum StoreError {
+pub enum StoreError {
     #[error("journal not found: {0}")]
     NotFound(String),
     #[error("journal already exists: {0}")]
@@ -29,7 +29,7 @@ pub(crate) enum StoreError {
 
 /// Where a schema-too-new condition was detected.
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum SchemaOrigin {
+pub enum SchemaOrigin {
     /// Detected reading a storage file (server binary is older than the file).
     Storage,
     /// Detected reading a wire response (client binary is older than the server).
@@ -38,7 +38,7 @@ pub(crate) enum SchemaOrigin {
 
 /// Backend-agnostic journal storage.
 #[async_trait]
-pub(crate) trait Store: Send + Sync {
+pub trait Store: Send + Sync {
     /// Load a journal page.
     ///
     /// `archived` determines which storage location to look in. Returns
@@ -58,12 +58,15 @@ pub(crate) trait Store: Send + Sync {
         title: String,
         meta: Option<HashMap<String, serde_json::Value>>,
     ) -> Result<(), StoreError>;
+    /// Add items to the journal. Returns the IDs of items that could not be stored
+    /// (e.g. due to an ID collision). An empty vec means all items were stored.
+    /// Fatal errors (network, permission, etc.) are returned as `Err`.
     async fn add_items(
         &self,
         name: &str,
         items: Vec<JournalItem>,
         archived: bool,
-    ) -> Result<usize, StoreError>;
+    ) -> Result<Vec<String>, StoreError>;
     /// Import a journal from an external [`JournalFile`].
     ///
     /// - `merge: false` — create a new journal (fails if it already exists).

@@ -1,0 +1,46 @@
+{
+  "index_patterns": ["foray-*"],
+  "template": {
+    "settings": {
+      "number_of_shards": 1,
+      "number_of_replicas": 1
+    },
+    "mappings": {
+      "dynamic": "strict",
+      "properties": {
+        "@timestamp": { "type": "date" },
+        "message":    { "type": "match_only_text" },
+        "tags":       { "type": "keyword" },
+        "event": {
+          "properties": {
+            "dataset": { "type": "keyword" }
+          }
+        },
+        "foray": {
+          "properties": {
+            "type":     { "type": "keyword" },
+            "schema":   { "type": "integer" },
+            "name": {
+              "type": "keyword",
+              "fields": { "text": { "type": "text" } }
+            },
+            "title": {
+              "type": "keyword",
+              "fields": { "text": { "type": "text" } }
+            },
+            "archived":   { "type": "boolean" },
+            "meta":       { "type": "flattened" },
+            "journal": {
+              "type": "keyword"
+            },
+            "item_size":  { "type": "integer" }
+          }
+        }
+      }
+    }
+  },
+  "_meta": {
+    "description": "foray journal index template — covers all indices matching foray-*",
+    "version": "2"
+  }
+}

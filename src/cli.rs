@@ -544,8 +544,13 @@ pub(crate) async fn run(cli: &Cli, store: &dyn Store) -> anyhow::Result<()> {
                 added_at: Utc::now(),
                 meta: parsed_meta,
             };
-            let count = store.add_items(&journal_name, vec![item], false).await?;
-            println!("Added to {journal_name} ({count} items)");
+            let failed = store.add_items(&journal_name, vec![item], false).await?;
+            if !failed.is_empty() {
+                return Err(anyhow::anyhow!(
+                    "failed to add item to {journal_name}: ID collision after store rejected it"
+                ));
+            }
+            println!("Added to {journal_name}");
         }
         Commands::Create { name, title, meta } => {
             validate_name(name).map_err(|e| anyhow::anyhow!(e))?;

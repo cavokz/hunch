@@ -1,10 +1,12 @@
 use crate::migrate;
 use crate::paths::{expand_tilde, resolve_foray_home};
 use crate::store::{Store, StoreError};
+use crate::store_elasticsearch::ElasticsearchStore;
 use crate::store_json::JsonFileStore;
 use crate::store_stdio::StdioStore;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -17,7 +19,7 @@ struct RawConfig {
     stores: BTreeMap<String, RawStoreConfig>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields, tag = "type")]
 enum RawStoreConfig {
     #[serde(rename = "json_file")]
@@ -46,6 +48,61 @@ enum RawStoreConfig {
         #[serde(default)]
         store: Option<String>,
     },
+    #[serde(rename = "elasticsearch")]
+    Elasticsearch {
+        /// Elasticsearch URL with the index as the last path segment,
+        /// e.g. `https://es.example.com/foray-team`.
+        url: String,
+        /// Human-readable description — required; helps the model suggest the right store.
+        description: String,
+        /// API key for authentication (mutually exclusive with username/password).
+        #[serde(default)]
+        api_key: Option<String>,
+        /// Username for HTTP Basic authentication (mutually exclusive with api_key).
+        #[serde(default)]
+        username: Option<String>,
+        /// Password for HTTP Basic authentication (mutually exclusive with api_key).
+        #[serde(default)]
+        password: Option<String>,
+    },
+}
+
+impl fmt::Debug for RawStoreConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RawStoreConfig::JsonFile { path, description } => f
+                .debug_struct("JsonFile")
+                .field("path", path)
+                .field("description", description)
+                .finish(),
+            RawStoreConfig::ForayStdio {
+                command,
+                args,
+                description,
+                store,
+            } => f
+                .debug_struct("ForayStdio")
+                .field("command", command)
+                .field("args", args)
+                .field("description", description)
+                .field("store", store)
+                .finish(),
+            RawStoreConfig::Elasticsearch {
+                url,
+                description,
+                api_key,
+                username,
+                password,
+            } => f
+                .debug_struct("Elasticsearch")
+                .field("url", url)
+                .field("description", description)
+                .field("api_key", &api_key.as_ref().map(|_| "<redacted>"))
+                .field("username", username)
+                .field("password", &password.as_ref().map(|_| "<redacted>"))
+                .finish(),
+        }
+    }
 }
 
 impl RawStoreConfig {
@@ -53,6 +110,7 @@ impl RawStoreConfig {
         match self {
             RawStoreConfig::JsonFile { description, .. } => description,
             RawStoreConfig::ForayStdio { description, .. } => description,
+            RawStoreConfig::Elasticsearch { description, .. } => description,
         }
     }
 }
@@ -123,6 +181,21 @@ impl StoreRegistry {
                     vec![],
                     store.clone(),
                 )),
+                RawStoreConfig::Elasticsearch {
+                    url,
+                    api_key,
+                    username,
+                    password,
+                    ..
+                } => {
+                    let es_store = ElasticsearchStore::new(
+                        url.clone(),
+                        api_key.clone(),
+                        username.clone(),
+                        password.clone(),
+                    )?;
+                    Arc::new(es_store) as Arc<dyn Store>
+                }
             };
             stores.push(StoreEntry {
                 name: name.clone(),

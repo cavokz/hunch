@@ -16,8 +16,8 @@ foray gives AI assistants a persistent journal backed by plain JSON files. Start
 
 - **Persistent context** — findings, decisions, and work-in-progress survive across sessions
 - **Cross-client** — VS Code, Cursor, Claude Desktop share the same journals simultaneously
-- **Human-editable** — plain JSON files you can `cat`, `jq`, `grep`, hand-edit
-- **Distributable** — local JSON store today; SSH and team backends planned, so intelligence isn't trapped on one machine
+- **Human-editable** — default store uses plain JSON files you can `cat`, `jq`, `grep`, hand-edit
+- **Distributable** — local JSON files, SSH remote, or Elasticsearch — intelligence isn't trapped on one machine
 
 ## How to Install
 
@@ -164,7 +164,7 @@ Any MCP Client (VS Code, Claude Desktop, Cursor, ...)
                   (cross-client context fusion)
 ```
 
-Single binary. No database. No daemon. Journals are plain JSON files.
+Single binary. No daemon. Pluggable store: local JSON files, SSH remote, or Elasticsearch.
 
 ## License
 

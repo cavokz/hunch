@@ -498,10 +498,42 @@ impl ForayServer {
                 items_to_add.push(item);
                 added_ids.push(id);
             }
-            store
-                .add_items(&args.name, items_to_add, args.archived)
-                .await
-                .map_err(Self::store_err)?;
+            // Retry items that failed with a fresh ID (e.g. ES 409 conflict).
+            // Bounded to prevent infinite loops; collisions are astronomically rare.
+            const MAX_RETRIES: usize = 3;
+            let mut remaining = items_to_add;
+            for attempt in 0..=MAX_RETRIES {
+                let failed_ids: std::collections::HashSet<String> = store
+                    .add_items(&args.name, remaining.clone(), args.archived)
+                    .await
+                    .map_err(Self::store_err)?
+                    .into_iter()
+                    .collect();
+                if failed_ids.is_empty() {
+                    break;
+                }
+                if attempt == MAX_RETRIES {
+                    return Err(ErrorData::internal_error(
+                        format!(
+                            "failed to store {} item(s) after {MAX_RETRIES} retries (ID collision)",
+                            failed_ids.len()
+                        ),
+                        None,
+                    ));
+                }
+                // Reassign fresh IDs to colliding items; update added_ids to match.
+                remaining = remaining
+                    .into_iter()
+                    .filter(|item| failed_ids.contains(&item.id))
+                    .map(|mut item| {
+                        let old_id = std::mem::replace(&mut item.id, item_id());
+                        if let Some(slot) = added_ids.iter_mut().find(|id| **id == old_id) {
+                            *slot = item.id.clone();
+                        }
+                        item
+                    })
+                    .collect();
+            }
         }
 
         // Load the requested page directly from the store.
